@@ -1,0 +1,46 @@
+local games = {
+    [10563114921] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/StealAnEgg.lua",
+    [6739698191]  = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/ViolenceDistrict.lua",
+    [93978595733734] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/ViolenceDistrict.lua",
+    [107778070777162] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/StealAnEgg.lua",
+}
+
+local currentPlaceID = game.PlaceId
+local currentUniverseID = game.GameId
+local scriptURL = games[currentUniverseID] or games[currentPlaceID]
+
+if scriptURL then
+    print("Meng Hub: Loading script for ID " .. (games[currentUniverseID] and "Universe" or "Place"))
+    
+    -- Kasih jeda kecil biar Delta selesai set-up memori
+    task.wait(0.2)
+
+    local success, rawCode = pcall(game.HttpGet, game, scriptURL)
+    
+    if success and rawCode and #rawCode > 0 then
+        -- Trik simpan ke file temp lokal biar RAM Delta Android gak jebol
+        local fileName = "menghub_temp_exec.luau"
+        pcall(function() writefile(fileName, rawCode) end)
+        task.wait(0.1)
+
+        local loadedFunc, err
+        if readfile and isfile and isfile(fileName) then
+            loadedFunc, err = loadstring(readfile(fileName))
+        else
+            loadedFunc, err = loadstring(rawCode)
+        end
+
+        if loadedFunc then
+            -- Jalankan di thread terpisah (Mencegah Native Crash)
+            task.spawn(loadedFunc)
+        else
+            warn("Meng Hub: Failed to compile script - " .. tostring(err))
+        end
+    else
+        warn("Meng Hub: Failed to fetch script from URL!")
+    end
+else
+    local msg = "\nMap not supported yet!\nPlaceId: " .. tostring(currentPlaceID) .. "\nUniverseId: " .. tostring(currentUniverseID)
+    game.Players.LocalPlayer:Kick(msg)
+    print(msg)
+end
