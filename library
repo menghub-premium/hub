@@ -1,8 +1,8 @@
 local games = {
-    [10563114921] = "https://raw.githubusercontent.com/GrexXMeng/Mengs/refs/heads/main/StealAnEgg.lua",
-    [6739698191] = "https://raw.githubusercontent.com/GrexXMeng/Mengs/refs/heads/main/ViolenceDistrict.lua",
-    [93978595733734] = "https://raw.githubusercontent.com/GrexXMeng/Mengs/refs/heads/main/ViolenceDistrict.lua",
-    [107778070777162] = "https://raw.githubusercontent.com/GrexXMeng/Mengs/refs/heads/main/StealAnEgg.lua",
+    [10563114921] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/StealAnEgg.lua",
+    [6739698191] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/ViolenceDistrict.lua",
+    [93978595733734] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/ViolenceDistrict.lua",
+    [107778070777162] = "https://raw.githubusercontent.com/menghub-premium/hub/refs/heads/main/StealAnEgg.lua",
 }
 
 local currentPlaceID = game.PlaceId
