@@ -1,0 +1,721 @@
+if not LPH_OBFUSCATED then
+    LPH_ENCSTR = function(s) return s end
+    LPH_ATTRIBUTES = function() end
+    VM = function() end
+    NONE = nil
+end
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+if getgenv().MengHubLoaded then
+    return warn("[Meng Hub] Script sudah running!")
+end
+if getgenv().MengHubKeyUI then return end
+
+-- ===== CONFIG =====
+local games = {
+    -- Violence District
+    [6739698191]      = "25a0f6c3cd97efadbebbb5f99a221f721b0a3a5b93421da461f86b51c41f14e8",
+    [93978595733734]  = "25a0f6c3cd97efadbebbb5f99a221f721b0a3a5b93421da461f86b51c41f14e8",
+
+    -- Steal An Egg (ganti dengan public token aslinya nanti)
+    [10563114921]     = "TOKEN_STEAL_AN_EGG_DISINI",
+    [107778070777162] = "TOKEN_STEAL_AN_EGG_DISINI",
+}
+
+local SERVICE        = LPH_ENCSTR("MENGPREM-SERVICE")
+local IDENTIFIER     = LPH_ENCSTR("12787")
+local VERIFY_URL     = LPH_ENCSTR("https://api.jnkie.com/api/v1/whitelist/verifyOpen")
+local DISCORD_INVITE = "https://discord.gg/menghub"
+local KEY_FILE       = "MENGHUB_SAVEDKEY.txt"
+
+-- ===== CEK MAP DULU =====
+local scriptURL = games[game.GameId] or games[game.PlaceId]
+if not scriptURL then
+    LocalPlayer:Kick("\nMap not supported yet!\nPlaceId: " .. tostring(game.PlaceId)
+        .. "\nUniverseId: " .. tostring(game.GameId))
+    return
+end
+
+-- ===== ANTI-BYPASS & HTTP CHECK =====
+local _bypassFlagged = false
+local _rawJSONDecode = HttpService.JSONDecode
+local _rawJSONEncode = HttpService.JSONEncode
+
+local function TriggerAntiBypass(reason)
+    _bypassFlagged = true
+    warn("[Bypass Detected!]: " .. tostring(reason))
+    task.wait(1.5)
+    pcall(function()
+        while true do
+            Instance.new("Part", workspace)
+        end
+    end)
+    while true do end
+end
+
+local httpRequest = (syn and syn.request) or request or http_request or (fluxus and fluxus.request)
+if not httpRequest then
+    return warn("[Meng Hub] Executor tidak mendukung HTTP request.")
+end
+if iscclosure and not iscclosure(httpRequest) then
+    TriggerAntiBypass("Hooked Request Function")
+end
+if iscclosure and not iscclosure(_rawJSONDecode) then
+    TriggerAntiBypass("Hooked JSONDecode")
+end
+
+-- ===== SAVED KEY (TANPA TTL) =====
+local function saveKey(key)
+    pcall(function() writefile(KEY_FILE, tostring(key)) end)
+end
+
+local function clearKey()
+    pcall(function() if isfile and isfile(KEY_FILE) and delfile then delfile(KEY_FILE) end end)
+    pcall(function() if isfile and isfile(KEY_FILE) then writefile(KEY_FILE, "") end end)
+end
+
+local function readSavedKey()
+    local ok, raw = pcall(readfile, KEY_FILE)
+    if not ok or not raw or raw == "" then return nil end
+    local k = (tostring(raw):match("^(.-)|") or tostring(raw)):gsub("%s+", "")
+    if k ~= "" then
+        return k
+    end
+    clearKey()
+    return nil
+end
+
+-- ===== VALIDASI KEY =====
+local REASONS = {
+    HWID_BANNED = "banned", BANNED = "banned",
+    HWID_MISMATCH = "hwid_mismatch",
+    KEY_EXPIRED = "expired",
+    KEY_INVALID = "invalid", KEY_INVALIDATED = "invalid", ALREADY_USED = "invalid",
+    SERVICE_MISMATCH = "invalid", PREMIUM_REQUIRED = "invalid",
+}
+local MESSAGES = {
+    banned = "HWID or key has been banned!",
+    hwid_mismatch = "Key bound to another device!",
+    expired = "License key has expired!",
+    server_error = "Server error, try again later.",
+    bypass_detected = "Bypass attempt detected!",
+    invalid = "Invalid key, check and try again!",
+}
+
+local function checkRawKey(key)
+    if iscclosure and not iscclosure(httpRequest) then
+        TriggerAntiBypass("Tampered HTTP")
+        return false, "bypass_detected"
+    end
+
+    local ok, resp = pcall(httpRequest, {
+        Method = "POST",
+        Url = VERIFY_URL,
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["X-Req-Verify"] = tostring(math.random(100000, 999999))
+        },
+        Body = _rawJSONEncode(HttpService, {
+            key = tostring(key or ""),
+            service = SERVICE,
+            identifier = tostring(IDENTIFIER)
+        }),
+    })
+
+    if not ok or not resp or type(resp) ~= "table" or resp.StatusCode ~= 200 then
+        return false, "server_error"
+    end
+
+    local okD, data = pcall(_rawJSONDecode, HttpService, resp.Body)
+    if not okD or type(data) ~= "table" then
+        return false, "server_error"
+    end
+
+    if data.valid == true and (data.message == "KEY_VALID" or data.message == "KEYLESS") then
+        if type(data.message) ~= "string" then
+            TriggerAntiBypass("Malformed Payload")
+            return false, "bypass_detected"
+        end
+        return true, "ok"
+    end
+
+    return false, REASONS[tostring(data.message or data.error or "")] or "invalid"
+end
+
+local function validateKey(key)
+    if not key or key == "" then return false, "invalid" end
+    if _bypassFlagged then return false, "bypass_detected" end
+
+    for i = 1, 2 do
+        local trapKey = "INVALID_TRAP_" .. HttpService:GenerateGUID(false)
+        local trapValid = checkRawKey(trapKey)
+        if trapValid == true or _bypassFlagged then
+            TriggerAntiBypass("Fake Response Spoofing #" .. i)
+            return false, "bypass_detected"
+        end
+    end
+
+    return checkRawKey(key)
+end
+
+-- ===== LOAD SCRIPT GAME =====
+local function launch(key)
+    local scriptId = games[game.GameId] or games[game.PlaceId]
+    if not scriptId then
+        LocalPlayer:Kick("\nMap not supported yet!")
+        return
+    end
+
+    local ok, Junkie = pcall(function()
+        return loadstring(game:HttpGet("https://jnkie.com/sdk/library.lua"))()
+    end)
+
+    if not ok or type(Junkie) ~= "table" then
+        warn("[Meng Hub] Gagal load Junkie SDK")
+        return
+    end
+
+    Junkie.script_id = scriptId
+    getgenv().SCRIPT_KEY = tostring(key)
+
+    getgenv().MengHubAuthed = true
+    getgenv().MengHubKey = key
+    getgenv().MengHubIsPremium = true 
+
+    local success, err = pcall(function()
+        Junkie.load_script()
+    end)
+
+    if not success then
+        warn("[Meng Hub] Gagal load script: " .. tostring(err))
+        getgenv().MengHubAuthed = false
+    end
+end
+
+-- ===== AUTO LOGIN DARI SAVED KEY =====
+local savedKey = readSavedKey()
+if savedKey then
+    local valid, reason = validateKey(savedKey)
+    if valid and not _bypassFlagged then
+        return launch(savedKey)
+    end
+    if reason == "banned" then
+        clearKey()
+        LocalPlayer:Kick("[Meng Hub]\nHWID/Key anda telah di ban!")
+        return
+    elseif reason ~= "server_error" then
+        clearKey()
+    end
+end
+
+-- ===== ANIMATED & MODERN UI KEY =====
+getgenv().MengHubKeyUI = true
+
+local function make(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    o.Parent = parent
+    return o
+end
+
+local function tween(obj, time, props, style, dir)
+    local t = TweenService:Create(
+        obj,
+        TweenInfo.new(time, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out),
+        props
+    )
+    t:Play()
+    return t
+end
+
+-- Palette
+local PURPLE       = Color3.fromRGB(168, 130, 255)
+local PURPLE_DARK  = Color3.fromRGB(115, 80, 210)
+local BG_MAIN      = Color3.fromRGB(14, 14, 20)
+local BG_CARD      = Color3.fromRGB(22, 22, 31)
+local TEXT_PRIMARY = Color3.fromRGB(245, 245, 252)
+local TEXT_MUTED   = Color3.fromRGB(135, 135, 155)
+
+local gui = make("ScreenGui", {
+    Name = "MengHubKey",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, (gethui and gethui()) or CoreGui)
+
+-- Container utama (untuk shadow + scale animation)
+local holder = make("Frame", {
+    Size = UDim2.fromOffset(400, 250),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundTransparency = 1,
+}, gui)
+
+local uiScale = make("UIScale", { Scale = 0.85 }, holder)
+
+-- Ambient Outer Glow / Drop Shadow
+local shadow = make("ImageLabel", {
+    Name = "Shadow",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 6),
+    Size = UDim2.new(1, 56, 1, 56),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://6014261993",
+    ImageColor3 = Color3.fromRGB(100, 65, 200),
+    ImageTransparency = 0.55,
+    ScaleType = Enum.ScaleType.Slice,
+    SliceCenter = Rect.new(49, 49, 450, 450),
+    ZIndex = 0,
+}, holder)
+
+-- Main Card
+local main = make("Frame", {
+    Size = UDim2.fromOffset(390, 240),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundColor3 = BG_MAIN,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+    ZIndex = 1,
+}, holder)
+make("UICorner", { CornerRadius = UDim.new(0, 16) }, main)
+
+-- Background Gradient biar gak flat
+make("UIGradient", {
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 21, 36)),
+        ColorSequenceKeypoint.new(0.45, Color3.fromRGB(15, 15, 22)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(11, 11, 16)),
+    }),
+    Rotation = 135,
+}, main)
+
+-- Animated Shimmering Border
+local mainStroke = make("UIStroke", {
+    Color = Color3.fromRGB(255, 255, 255),
+    Thickness = 1.4,
+    Transparency = 0.25,
+}, main)
+local strokeGradient = make("UIGradient", {
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.0, PURPLE),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(55, 50, 80)),
+        ColorSequenceKeypoint.new(1.0, Color3.fromRGB(120, 210, 255)),
+    }),
+    Rotation = 0,
+}, mainStroke)
+
+-- Subtle Top Accent Glow Bar
+local topGlow = make("Frame", {
+    Size = UDim2.new(0.6, 0, 0, 2),
+    Position = UDim2.new(0.2, 0, 0, 0),
+    BackgroundColor3 = PURPLE,
+    BorderSizePixel = 0,
+    ZIndex = 2,
+}, main)
+make("UIGradient", {
+    Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(0.5, 0.1),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+}, topGlow)
+
+-- Smooth Dragging System
+local dragging, dragStart, startPos = false, nil, nil
+main.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = holder.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+        local d = input.Position - dragStart
+        local targetPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        tween(holder, 0.08, { Position = targetPos }, Enum.EasingStyle.Quad)
+    end
+end)
+
+-- Header Title + Premium Pill Badge
+make("TextLabel", {
+    Text = "MENG HUB",
+    Font = Enum.Font.GothamBlack,
+    TextSize = 15,
+    TextColor3 = TEXT_PRIMARY,
+    BackgroundTransparency = 1,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Position = UDim2.fromOffset(22, 14),
+    Size = UDim2.fromOffset(92, 20),
+    ZIndex = 2,
+}, main)
+
+local badge = make("Frame", {
+    Position = UDim2.fromOffset(115, 15),
+    Size = UDim2.fromOffset(64, 18),
+    BackgroundColor3 = Color3.fromRGB(168, 130, 255),
+    BackgroundTransparency = 0.84,
+    BorderSizePixel = 0,
+    ZIndex = 2,
+}, main)
+make("UICorner", { CornerRadius = UDim.new(1, 0) }, badge)
+make("UIStroke", { Color = PURPLE, Thickness = 1, Transparency = 0.55 }, badge)
+make("TextLabel", {
+    Text = "PREMIUM",
+    Font = Enum.Font.GothamBold,
+    TextSize = 9,
+    TextColor3 = PURPLE,
+    BackgroundTransparency = 1,
+    Size = UDim2.fromScale(1, 1),
+    ZIndex = 3,
+}, badge)
+
+make("TextLabel", {
+    Text = "Key System Authentication",
+    Font = Enum.Font.GothamMedium,
+    TextSize = 11,
+    TextColor3 = TEXT_MUTED,
+    BackgroundTransparency = 1,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Position = UDim2.fromOffset(22, 34),
+    Size = UDim2.new(1, -80, 0, 14),
+    ZIndex = 2,
+}, main)
+
+-- Helper efek hover & klik tombol
+local function applyButtonAnim(btn, normalBg, hoverBg, pressScale)
+    local btnScale = make("UIScale", { Scale = 1 }, btn)
+    btn.MouseEnter:Connect(function()
+        tween(btn, 0.18, { BackgroundColor3 = hoverBg })
+        tween(btnScale, 0.18, { Scale = 1.02 })
+    end)
+    btn.MouseLeave:Connect(function()
+        tween(btn, 0.18, { BackgroundColor3 = normalBg })
+        tween(btnScale, 0.18, { Scale = 1 })
+    end)
+    btn.MouseButton1Down:Connect(function()
+        tween(btnScale, 0.1, { Scale = pressScale or 0.96 })
+    end)
+    btn.MouseButton1Up:Connect(function()
+        tween(btnScale, 0.15, { Scale = 1.02 }, Enum.EasingStyle.Back)
+    end)
+end
+
+-- Close Button
+local closeBtn = make("TextButton", {
+    Text = "×",
+    Font = Enum.Font.GothamBold,
+    TextSize = 17,
+    AutoButtonColor = false,
+    TextColor3 = Color3.fromRGB(170, 170, 190),
+    BackgroundColor3 = Color3.fromRGB(26, 26, 36),
+    Position = UDim2.new(1, -44, 0, 14),
+    Size = UDim2.fromOffset(28, 28),
+    ZIndex = 2,
+}, main)
+make("UICorner", { CornerRadius = UDim.new(0, 8) }, closeBtn)
+make("UIStroke", { Color = Color3.fromRGB(48, 48, 66), Thickness = 1 }, closeBtn)
+applyButtonAnim(closeBtn, Color3.fromRGB(26, 26, 36), Color3.fromRGB(190, 60, 75), 0.92)
+closeBtn.MouseEnter:Connect(function()
+    tween(closeBtn, 0.18, { TextColor3 = Color3.new(1, 1, 1) })
+end)
+closeBtn.MouseLeave:Connect(function()
+    tween(closeBtn, 0.18, { TextColor3 = Color3.fromRGB(170, 170, 190) })
+end)
+
+-- Divider Line with Gradient
+local divider = make("Frame", {
+    Position = UDim2.fromOffset(22, 58),
+    Size = UDim2.new(1, -44, 0, 1),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BackgroundTransparency = 0.88,
+    BorderSizePixel = 0,
+    ZIndex = 2,
+}, main)
+make("UIGradient", {
+    Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(0.2, 0),
+        NumberSequenceKeypoint.new(0.8, 0),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+}, divider)
+
+-- Label Input
+make("TextLabel", {
+    Text = "LICENSE KEY",
+    Font = Enum.Font.GothamBold,
+    TextSize = 10,
+    TextColor3 = PURPLE,
+    BackgroundTransparency = 1,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Position = UDim2.fromOffset(22, 70),
+    Size = UDim2.new(1, -44, 0, 16),
+    ZIndex = 2,
+}, main)
+
+-- Input Container
+local inputFrame = make("Frame", {
+    Position = UDim2.fromOffset(22, 90),
+    Size = UDim2.new(1, -44, 0, 44),
+    BackgroundColor3 = BG_CARD,
+    BorderSizePixel = 0,
+    ZIndex = 2,
+}, main)
+make("UICorner", { CornerRadius = UDim.new(0, 10) }, inputFrame)
+local inputStroke = make("UIStroke", {
+    Color = Color3.fromRGB(48, 48, 66),
+    Thickness = 1.2,
+}, inputFrame)
+
+local box = make("TextBox", {
+    PlaceholderText = "Paste your license key here...",
+    Text = "",
+    ClearTextOnFocus = false,
+    Font = Enum.Font.GothamMedium,
+    TextSize = 12,
+    TextColor3 = TEXT_PRIMARY,
+    PlaceholderColor3 = Color3.fromRGB(95, 95, 115),
+    BackgroundTransparency = 1,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Position = UDim2.fromOffset(14, 0),
+    Size = UDim2.new(1, -86, 1, 0),
+    ZIndex = 3,
+}, inputFrame)
+
+box.Focused:Connect(function()
+    tween(inputStroke, 0.22, { Color = PURPLE, Thickness = 1.6 })
+    tween(inputFrame, 0.22, { BackgroundColor3 = Color3.fromRGB(27, 26, 38) })
+end)
+box.FocusLost:Connect(function()
+    tween(inputStroke, 0.22, { Color = Color3.fromRGB(48, 48, 66), Thickness = 1.2 })
+    tween(inputFrame, 0.22, { BackgroundColor3 = BG_CARD })
+end)
+
+-- Paste Button
+local pasteBtn = make("TextButton", {
+    Text = "PASTE",
+    Font = Enum.Font.GothamBold,
+    TextSize = 10,
+    AutoButtonColor = false,
+    TextColor3 = Color3.fromRGB(210, 210, 230),
+    BackgroundColor3 = Color3.fromRGB(34, 34, 48),
+    Position = UDim2.new(1, -68, 0.5, 0),
+    AnchorPoint = Vector2.new(0, 0.5),
+    Size = UDim2.fromOffset(60, 30),
+    ZIndex = 3,
+}, inputFrame)
+make("UICorner", { CornerRadius = UDim.new(0, 7) }, pasteBtn)
+make("UIStroke", { Color = Color3.fromRGB(58, 58, 78), Thickness = 1 }, pasteBtn)
+applyButtonAnim(pasteBtn, Color3.fromRGB(34, 34, 48), Color3.fromRGB(48, 46, 68), 0.94)
+
+-- Status Indicator Row (Pulsing Dot + Animated Text)
+local statusRow = make("Frame", {
+    Position = UDim2.fromOffset(22, 142),
+    Size = UDim2.new(1, -44, 0, 22),
+    BackgroundTransparency = 1,
+    ZIndex = 2,
+}, main)
+
+local statusDot = make("Frame", {
+    Position = UDim2.new(0, 2, 0.5, 0),
+    AnchorPoint = Vector2.new(0, 0.5),
+    Size = UDim2.fromOffset(7, 7),
+    BackgroundColor3 = PURPLE,
+    BorderSizePixel = 0,
+    ZIndex = 3,
+}, statusRow)
+make("UICorner", { CornerRadius = UDim.new(1, 0) }, statusDot)
+
+local status = make("TextLabel", {
+    Text = "Enter your key or get one on Discord",
+    Font = Enum.Font.GothamMedium,
+    TextSize = 11,
+    TextColor3 = TEXT_MUTED,
+    BackgroundTransparency = 1,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Position = UDim2.fromOffset(16, 0),
+    Size = UDim2.new(1, -16, 1, 0),
+    ZIndex = 3,
+}, statusRow)
+
+local function setStatus(text, color)
+    status.Text = text
+    tween(status, 0.2, { TextColor3 = color })
+    tween(statusDot, 0.2, { BackgroundColor3 = color })
+end
+
+-- Animasi Shake saat error
+local function shakeInput()
+    local orig = inputFrame.Position
+    tween(inputStroke, 0.15, { Color = Color3.fromRGB(235, 95, 95) })
+    task.spawn(function()
+        local offsets = { -7, 7, -5, 5, -3, 3, 0 }
+        for _, off in ipairs(offsets) do
+            tween(inputFrame, 0.04, { Position = UDim2.new(orig.X.Scale, orig.X.Offset + off, orig.Y.Scale, orig.Y.Offset) }, Enum.EasingStyle.Sine)
+            task.wait(0.04)
+        end
+        task.wait(0.4)
+        tween(inputStroke, 0.25, { Color = Color3.fromRGB(48, 48, 66) })
+    end)
+end
+
+-- Bottom Action Buttons
+local getKeyBtn = make("TextButton", {
+    Text = "GET KEY",
+    Font = Enum.Font.GothamBold,
+    TextSize = 11,
+    AutoButtonColor = false,
+    TextColor3 = Color3.fromRGB(215, 215, 230),
+    BackgroundColor3 = Color3.fromRGB(26, 26, 36),
+    Position = UDim2.fromOffset(22, 176),
+    Size = UDim2.new(0.46, -24, 0, 42),
+    ZIndex = 2,
+}, main)
+make("UICorner", { CornerRadius = UDim.new(0, 10) }, getKeyBtn)
+make("UIStroke", { Color = Color3.fromRGB(52, 52, 70), Thickness = 1.1 }, getKeyBtn)
+applyButtonAnim(getKeyBtn, Color3.fromRGB(26, 26, 36), Color3.fromRGB(36, 36, 50), 0.96)
+
+local verifyBtn = make("TextButton", {
+    Text = "VERIFY KEY",
+    Font = Enum.Font.GothamBold,
+    TextSize = 11,
+    AutoButtonColor = false,
+    TextColor3 = Color3.fromRGB(16, 14, 24),
+    BackgroundColor3 = PURPLE,
+    Position = UDim2.new(0.46, 6, 0, 176),
+    Size = UDim2.new(0.54, -28, 0, 42),
+    ZIndex = 2,
+}, main)
+make("UICorner", { CornerRadius = UDim.new(0, 10) }, verifyBtn)
+make("UIGradient", {
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(190, 155, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(145, 105, 245)),
+    }),
+    Rotation = 90,
+}, verifyBtn)
+applyButtonAnim(verifyBtn, PURPLE, Color3.fromRGB(185, 150, 255), 0.96)
+
+-- Background Ambient Loops (Border Shimmer + Status Dot Pulse)
+local alive = true
+local loopConn
+loopConn = RunService.RenderStepped:Connect(function(dt)
+    if not alive or not gui.Parent then
+        if loopConn then loopConn:Disconnect() end
+        return
+    end
+    strokeGradient.Rotation = (strokeGradient.Rotation + 45 * dt) % 360
+end)
+
+task.spawn(function()
+    while alive and gui.Parent do
+        tween(statusDot, 0.7, { BackgroundTransparency = 0.65 }, Enum.EasingStyle.Sine)
+        task.wait(0.7)
+        if not alive then break end
+        tween(statusDot, 0.7, { BackgroundTransparency = 0 }, Enum.EasingStyle.Sine)
+        task.wait(0.7)
+    end
+end)
+
+-- Smooth Close Helper
+local function closeUI(callback)
+    alive = false
+    if loopConn then loopConn:Disconnect() end
+    tween(shadow, 0.22, { ImageTransparency = 1 })
+    local t = tween(uiScale, 0.22, { Scale = 0.85 }, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+    t.Completed:Wait()
+    gui:Destroy()
+    getgenv().MengHubKeyUI = nil
+    if callback then callback() end
+end
+
+-- Entrance Pop-In Animation
+tween(uiScale, 0.38, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+-- Button Events
+closeBtn.MouseButton1Click:Connect(function()
+    closeUI()
+end)
+
+pasteBtn.MouseButton1Click:Connect(function()
+    local ok, clip = pcall(function() return getclipboard and getclipboard() or "" end)
+    if ok and clip and clip ~= "" then
+        box.Text = (tostring(clip):gsub("%s+", ""))
+        setStatus("Key pasted from clipboard!", PURPLE)
+    else
+        shakeInput()
+        setStatus("Clipboard empty or unsupported.", Color3.fromRGB(235, 120, 120))
+    end
+end)
+
+getKeyBtn.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard(DISCORD_INVITE) end)
+    setStatus("Discord invite copied to clipboard!", PURPLE)
+end)
+
+local busy = false
+verifyBtn.MouseButton1Click:Connect(function()
+    if busy then return end
+    local key = (box.Text:gsub("%s+", ""))
+    if key == "" then
+        shakeInput()
+        return setStatus("Please enter a license key first!", Color3.fromRGB(235, 110, 110))
+    end
+
+    busy = true
+    verifyBtn.Text = "CHECKING..."
+    setStatus("Validating license key...", Color3.fromRGB(235, 205, 115))
+
+    -- Animasi titik loading
+    local loading = true
+    task.spawn(function()
+        local dots = { ".", "..", "..." }
+        local idx = 1
+        while loading and alive do
+            verifyBtn.Text = "CHECKING" .. dots[idx]
+            idx = (idx % #dots) + 1
+            task.wait(0.3)
+        end
+    end)
+
+    task.spawn(function()
+        local valid, reason = validateKey(key)
+        loading = false
+
+        if valid and not _bypassFlagged then
+            saveKey(key)
+            verifyBtn.Text = "VERIFIED ✓"
+            tween(verifyBtn, 0.2, { BackgroundColor3 = Color3.fromRGB(110, 225, 145) })
+            setStatus("Key verified! Launching Meng Hub...", Color3.fromRGB(115, 230, 145))
+            task.wait(0.45)
+            closeUI(function()
+                launch(key)
+            end)
+        else
+            busy = false
+            verifyBtn.Text = "VERIFY KEY"
+            if reason == "banned" then
+                clearKey()
+                LocalPlayer:Kick("[Meng Hub]\nHWID/Key anda telah di ban!")
+                return
+            end
+            shakeInput()
+            setStatus(MESSAGES[reason] or MESSAGES.invalid, Color3.fromRGB(235, 100, 100))
+        end
+    end)
+end)
